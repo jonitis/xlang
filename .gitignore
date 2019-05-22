@@ -342,3 +342,4 @@ src/test/python/__pycache__/
 
 # Ignore copied license
 src/package/cppwinrt/vsix/LICENSE
+/_output
