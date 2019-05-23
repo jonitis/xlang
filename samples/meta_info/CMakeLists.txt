@@ -53,7 +53,7 @@ endif()
 
 if (MSVC)
     TARGET_CONFIG_MSVC_PCH(meta_info pch.cpp pch.h)
-    target_link_libraries(meta_info)
+    target_link_libraries(meta_info windowsapp shlwapi)
 else()
     target_link_libraries(meta_info c++ c++abi c++experimental)
     target_link_libraries(meta_info -lpthread)

@@ -26,6 +26,15 @@ static constexpr cmd::option options[]
 };
 
 
+struct settings_type
+{
+    std::set<std::string> input;
+    std::set<std::string> include;
+    std::set<std::string> exclude;
+    bool verbose{};
+} settings;
+
+
 struct meta_summary
 {
     meta_summary(std::string_view const& title) noexcept : title{ title } {}
@@ -263,6 +272,29 @@ Where <spec> is one or more of:
     w.write(format, bind_each(printOption, options));
 }
 
+static void process_args(int const argc, char** argv)
+{
+    cmd::reader args{ argc, argv, options };
+
+    if (!args || args.exists("help"))
+        throw usage_exception{};
+
+    settings.verbose = args.exists("verbose");
+    settings.input = args.files("input", database::is_database);
+
+    for (auto&& include : args.values("include"))
+    {
+        settings.include.insert(include);
+    }
+
+    for (auto&& exclude : args.values("exclude"))
+    {
+        settings.exclude.insert(exclude);
+    }
+}
+
+
+
 static int run(int const argc, char** argv)
 {
     int result{};
@@ -270,19 +302,14 @@ static int run(int const argc, char** argv)
 
     try
     {
-        auto start = high_resolution_clock::now();
+        const auto start = high_resolution_clock::now();
 
-        reader args{ argc, argv, options };
+        process_args(argc, argv);
 
-        if (!args || args.exists("help"))
-            throw usage_exception{};
+        cache c{ settings.input };
+        filter f{ settings.include, settings.exclude };
 
-        cache c{ args.values("input") };
-        bool const verbose = args.exists("verbose");
-
-        filter f{ args.values("include"), args.values("exclude") };
-
-        if (verbose)
+        if (settings.verbose)
         {
             std::for_each(c.databases().begin(), c.databases().end(), [&](auto&& db)
                 {
@@ -306,7 +333,7 @@ static int run(int const argc, char** argv)
 
             filtered_info += ns_info;
 
-            if (verbose)
+            if (settings.verbose)
             {
                 w.Write(ns_info);
             }
@@ -319,7 +346,7 @@ static int run(int const argc, char** argv)
 
         w.Write(total_info);
 
-        if (verbose)
+        if (settings.verbose)
         {
             w.write("time: %ms\n", duration_cast<duration<int64_t, std::milli>>(high_resolution_clock::now() - start).count());
         }

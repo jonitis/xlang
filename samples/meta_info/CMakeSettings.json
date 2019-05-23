@@ -11,6 +11,18 @@
       "buildCommandArgs": "-v",
       "ctestCommandArgs": "",
       "variables": []
+    },
+    {
+      "name": "x64-Release",
+      "generator": "Ninja",
+      "configurationType": "Release",
+      "buildRoot": "${projectDir}\\..\\..\\_build\\meta_info\\${name}",
+      "installRoot": "${projectDir}\\..\\..\\_install\\meta_info\\${name}",
+      "cmakeCommandArgs": "",
+      "buildCommandArgs": "-v",
+      "ctestCommandArgs": "",
+      "inheritEnvironments": [ "msvc_x64_x64" ],
+      "variables": []
     }
   ]
 }
