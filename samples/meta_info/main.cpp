@@ -10,6 +10,70 @@ using namespace xlang::cmd;
 template <typename...T> struct overloaded : T... { using T::operator()...; };
 template <typename...T> overloaded(T...)->overloaded<T...>;
 
+
+struct meta_summary
+{
+    meta_summary(std::string_view const& title) noexcept : title{ title } {}
+    meta_summary(std::string_view const& ns, cache::namespace_members const& members) noexcept : title{ ns }, single_namespace{ true }
+    {
+        num_namespaces = 1;
+        num_interfaces = members.interfaces.size();
+        num_classes = members.classes.size();
+        num_structs = members.structs.size();
+        num_enums = members.enums.size();
+        num_delegates = members.delegates.size();
+        num_attributes = members.attributes.size();
+        num_contracts = members.contracts.size();
+
+        for (auto const& iface : members.interfaces)
+        {
+            auto const& methods = iface.MethodList();
+            auto const& properties = iface.PropertyList();
+            auto const& events = iface.EventList();
+            auto const& fields = iface.FieldList();
+
+            num_methods += distance(methods);
+            num_properties += distance(properties);
+            num_events += distance(events);
+            num_fields += distance(fields);
+        }
+    }
+
+    const std::string title;
+    const bool single_namespace{};
+    size_t num_namespaces{};
+    size_t num_interfaces{};
+    size_t num_methods{};
+    size_t num_properties{};
+    size_t num_events{};
+    size_t num_fields{};
+    size_t num_classes{};
+    size_t num_structs{};
+    size_t num_enums{};
+    size_t num_delegates{};
+    size_t num_attributes{};
+    size_t num_contracts{};
+
+    meta_summary& operator +=(meta_summary const& other) noexcept
+    {
+        num_namespaces += other.num_namespaces;
+        num_interfaces += other.num_interfaces;
+        num_methods += other.num_methods;
+        num_properties += other.num_properties;
+        num_events += other.num_events;
+        num_fields += other.num_fields;
+        num_classes += other.num_classes;
+        num_structs += other.num_structs;
+        num_enums += other.num_enums;
+        num_delegates += other.num_delegates;
+        num_attributes += other.num_attributes;
+        num_contracts += other.num_contracts;
+
+        return *this;
+    }
+};
+
+
 struct writer : writer_base<writer>
 {
     using writer_base<writer>::write;
@@ -103,12 +167,36 @@ struct writer : writer_base<writer>
 
         return result;
     }
+
+    void Write(meta_summary const& info)
+    {
+        write("%\n", info.title);
+
+        if (!info.single_namespace)
+        {
+            write("Namespaces     %\n", info.num_namespaces);
+        }
+
+        write("Interfaces     %\n", info.num_interfaces);
+        write("Methods        %\n", info.num_methods);
+        write("Properties     %\n", info.num_properties);
+        write("Events         %\n", info.num_events);
+//        write("Fields         %\n", info.num_fields);
+        write("Classes        %\n", info.num_classes);
+        write("Structs        %\n", info.num_structs);
+        write("Enums          %\n", info.num_enums);
+        write("Delegates      %\n", info.num_delegates);
+        write("Attributes     %\n", info.num_attributes);
+        write("Contracts      %\n", info.num_contracts);
+        write('\n');
+    }
 };
 
 void print_usage()
 {
     puts("Usage...");
 }
+
 
 int main(int const argc, char** argv)
 {
@@ -122,7 +210,6 @@ int main(int const argc, char** argv)
         {
             // name, min, max
             { "input", 1 },
-//            { "output", 0, 1 },
             { "include", 0 },
             { "exclude", 0 },
             { "verbose", 0, 0 },
@@ -151,35 +238,22 @@ int main(int const argc, char** argv)
 
         w.flush_to_console();
 
-        size_t num_namespaces{};
-        size_t num_interfaces{};
-        size_t num_classes{};
-        size_t num_structs{};
-        size_t num_enums{};
-        size_t num_delegates{};
-        size_t num_attributes{};
-        size_t num_contracts{};
+        meta_summary total_info("Total");
 
         for (auto const& [ns, members] : c.namespaces())
         {
-            num_namespaces++;
-            num_interfaces += members.interfaces.size();
-            num_classes += members.classes.size();
-            num_structs += members.structs.size();
-            num_enums += members.enums.size();
-            num_delegates += members.delegates.size();
-            num_attributes += members.attributes.size();
-            num_contracts += members.contracts.size();
+            meta_summary ns_info(ns, members);
+
+            if (verbose)
+            {
+                w.Write(ns_info);
+            }
+
+            total_info += ns_info;
         }
 
-        w.write("Namespaces     %\n", num_namespaces);
-        w.write("Interfaces     %\n", num_interfaces);
-        w.write("Classes        %\n", num_classes);
-        w.write("Structs        %\n", num_structs);
-        w.write("Enums          %\n", num_enums);
-        w.write("Delegates      %\n", num_delegates);
-        w.write("Attributes     %\n", num_attributes);
-        w.write("Contracts      %\n", num_contracts);
+        w.Write(total_info);
+
 
         if (verbose)
         {
