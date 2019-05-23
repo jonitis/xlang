@@ -11,6 +11,21 @@ template <typename...T> struct overloaded : T... { using T::operator()...; };
 template <typename...T> overloaded(T...)->overloaded<T...>;
 
 
+namespace meta_info
+{
+
+struct usage_exception {};
+
+static constexpr cmd::option options[]
+{
+    { "input",   0, cmd::option::no_max, "<spec>", "Windows metadata to display info for" },
+    { "include", 0, cmd::option::no_max, "<prefix>", "One or more prefixes to include in input" },
+    { "exclude", 0, cmd::option::no_max, "<prefix>", "One or more prefixes to exclude from input" },
+    { "verbose", 0, 0, {}, "Show detailed information" },
+    { "help", 0, 0, {}, "Show detailed help" }
+};
+
+
 struct meta_summary
 {
     meta_summary(std::string_view const& title) noexcept : title{ title } {}
@@ -70,6 +85,27 @@ struct meta_summary
         num_contracts += other.num_contracts;
 
         return *this;
+    }
+
+    bool operator ==(meta_summary const& other) noexcept
+    {
+        return num_namespaces == other.num_namespaces &&
+               num_interfaces == other.num_interfaces &&
+               num_methods == other.num_methods &&
+               num_properties == other.num_properties &&
+               num_events == other.num_events &&
+               num_fields == other.num_fields &&
+               num_classes == other.num_classes &&
+               num_structs == other.num_structs &&
+               num_enums == other.num_enums &&
+               num_delegates == other.num_delegates &&
+               num_attributes == other.num_attributes &&
+               num_contracts == other.num_contracts;
+    }
+
+    bool operator !=(meta_summary const& other) noexcept
+    {
+        return !operator ==(other);
     }
 };
 
@@ -192,36 +228,54 @@ struct writer : writer_base<writer>
     }
 };
 
-void print_usage()
+
+static void print_usage(writer& w)
 {
-    puts("Usage...");
+    static auto printColumns = [](writer& w, std::string_view const& col1, std::string_view const& col2)
+    {
+        w.write_printf("  %-20s%s\n", col1.data(), col2.data());
+    };
+
+    static auto printOption = [](writer& w, cmd::option const& opt)
+    {
+        if (opt.desc.empty())
+        {
+            return;
+        }
+        printColumns(w, w.write_temp("-% %", opt.name, opt.arg), opt.desc);
+    };
+
+    auto format = R"(
+meta_info.exe [options...]
+
+Options:
+
+%  ^@<path>             Response file containing command line options
+
+Where <spec> is one or more of:
+
+  path                Path to winmd file or recursively scanned folder
+  local               Local ^%WinDir^%\System32\WinMetadata folder
+  sdk[+]              Current version of Windows SDK [with extensions]
+  10.0.12345.0[+]     Specific version of Windows SDK [with extensions]
+)";
+
+    w.write(format, bind_each(printOption, options));
 }
 
-
-int main(int const argc, char** argv)
+static int run(int const argc, char** argv)
 {
+    int result{};
     writer w;
 
     try
     {
         auto start = high_resolution_clock::now();
 
-        static constexpr cmd::option options[]
-        {
-            // name, min, max
-            { "input", 1 },
-            { "include", 0 },
-            { "exclude", 0 },
-            { "verbose", 0, 0 },
-        };
-
         reader args{ argc, argv, options };
 
-        if (!args)
-        {
-            print_usage();
-            return 0;
-        }
+        if (!args || args.exists("help"))
+            throw usage_exception{};
 
         cache c{ args.values("input") };
         bool const verbose = args.exists("verbose");
@@ -231,29 +285,39 @@ int main(int const argc, char** argv)
         if (verbose)
         {
             std::for_each(c.databases().begin(), c.databases().end(), [&](auto&& db)
-            {
-                w.write("in: %\n", db.path());
-            });
+                {
+                    w.write("in: %\n", db.path());
+                });
         }
 
         w.flush_to_console();
 
         meta_summary total_info("Total");
+        meta_summary filtered_info("Filtered");
 
         for (auto const& [ns, members] : c.namespaces())
         {
             meta_summary ns_info(ns, members);
 
+            total_info += ns_info;
+
+            if (!f.includes(members))
+                continue;
+
+            filtered_info += ns_info;
+
             if (verbose)
             {
                 w.Write(ns_info);
             }
+        }
 
-            total_info += ns_info;
+        if (!f.empty() && filtered_info != total_info)
+        {
+            w.Write(filtered_info);
         }
 
         w.Write(total_info);
-
 
         if (verbose)
         {
@@ -262,8 +326,24 @@ int main(int const argc, char** argv)
     }
     catch (std::exception const& e)
     {
-        w.write("%\n", e.what());
+        w.write("\nERROR: %\n", e.what());
+
+        result = 1;
+    }
+    catch (usage_exception const&)
+    {
+        print_usage(w);
     }
 
     w.flush_to_console();
+
+    return result;
+}
+
+}
+
+
+int main(int const argc, char** argv)
+{
+    return meta_info::run(argc, argv);
 }
