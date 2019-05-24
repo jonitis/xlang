@@ -18,11 +18,26 @@ struct usage_exception {};
 
 static constexpr cmd::option options[]
 {
-    { "input",   0, cmd::option::no_max, "<spec>", "Windows metadata to display info for" },
-    { "include", 0, cmd::option::no_max, "<prefix>", "One or more prefixes to include in input" },
-    { "exclude", 0, cmd::option::no_max, "<prefix>", "One or more prefixes to exclude from input" },
-    { "verbose", 0, 0, {}, "Show detailed information" },
-    { "help", 0, 0, {}, "Show detailed help" }
+    { "input",              0, cmd::option::no_max, "<spec>", "Windows metadata to display info for" },
+    { "include",            0, cmd::option::no_max, "<prefix>", "One or more prefixes to include in input" },
+    { "exclude",            0, cmd::option::no_max, "<prefix>", "One or more prefixes to exclude from input" },
+    { "group-lists",        0, 0, {}, "Group lists hierarchically" },
+    { "extra-details",      0, 0, {}, "Display more details for types" },
+    { "list-all",           0, 0, {}, "List all types" },
+    { "list-namespaces",    0, 0, {}, "List namespaces" },
+    { "list-interfaces",    0, 0, {}, "List interfaces" },
+    { "list-methods",       0, 0, {}, "List methods" },
+    { "list-properties",    0, 0, {}, "List properties" },
+    { "list-events",        0, 0, {}, "List events" },
+    { "list-fields",        0, 0, {}, "List fields" },
+    { "list-classes",       0, 0, {}, "List classes" },
+    { "list-structs",       0, 0, {}, "List structs" },
+    { "list-enums",         0, 0, {}, "List enums" },
+    { "list-delegates",     0, 0, {}, "List delegates" },
+    { "list-attributes",    0, 0, {}, "List attributes" },
+    { "list-contracts",     0, 0, {}, "List contracts" },
+    { "verbose",            0, 0, {}, "Show detailed information" },
+    { "help",               0, 0, {}, "Show detailed help" }
 };
 
 
@@ -31,7 +46,22 @@ struct settings_type
     std::set<std::string> input;
     std::set<std::string> include;
     std::set<std::string> exclude;
+    filter filter;
     bool verbose{};
+    bool group_lists;
+    bool extra_details;
+    bool list_namespaces;
+    bool list_interfaces;
+    bool list_methods;
+    bool list_properties;
+    bool list_events;
+    bool list_fields;
+    bool list_classes;
+    bool list_structs;
+    bool list_enums;
+    bool list_delegates;
+    bool list_attributes;
+    bool list_contracts;
 } settings;
 
 
@@ -213,12 +243,124 @@ struct writer : writer_base<writer>
         return result;
     }
 
-    void Write(meta_summary const& info)
+    void write_value(bool value)
+    {
+        write(value ? "TRUE"sv : "FALSE"sv);
+    }
+
+    void write_value(char16_t value)
+    {
+        write_printf("%#0hx", value);
+    }
+
+    void write_value(int8_t value)
+    {
+        write_printf("%hhd", value);
+    }
+
+    void write_value(uint8_t value)
+    {
+        write_printf("%#0hhx", value);
+    }
+
+    void write_value(int16_t value)
+    {
+        write_printf("%hd", value);
+    }
+
+    void write_value(uint16_t value)
+    {
+        write_printf("%#0hx", value);
+    }
+
+    void write_value(int32_t value)
+    {
+        write_printf("%d", value);
+    }
+
+    void write_value(uint32_t value)
+    {
+        write_printf("%#0x", value);
+    }
+
+    void write_value(int64_t value)
+    {
+        write_printf("%lld", value);
+    }
+
+    void write_value(uint64_t value)
+    {
+        write_printf("%#0llx", value);
+    }
+
+    void write_value(float value)
+    {
+        write_printf("%f", value);
+    }
+
+    void write_value(double value)
+    {
+        write_printf("%f", value);
+    }
+
+    void write_value(std::string_view value)
+    {
+        write("\"%\"", value);
+    }
+
+    void write(Constant const& value)
+    {
+        switch (value.Type()) {
+        case ConstantType::Boolean:
+            write_value(value.ValueBoolean());
+            break;
+        case ConstantType::Char:
+            write_value(value.ValueChar());
+            break;
+        case ConstantType::Int8:
+            write_value(value.ValueInt8());
+            break;
+        case ConstantType::UInt8:
+            write_value(value.ValueUInt8());
+            break;
+        case ConstantType::Int16:
+            write_value(value.ValueInt16());
+            break;
+        case ConstantType::UInt16:
+            write_value(value.ValueUInt16());
+            break;
+        case ConstantType::Int32:
+            write_value(value.ValueInt32());
+            break;
+        case ConstantType::UInt32:
+            write_value(value.ValueUInt32());
+            break;
+        case ConstantType::Int64:
+            write_value(value.ValueInt64());
+            break;
+        case ConstantType::UInt64:
+            write_value(value.ValueUInt64());
+            break;
+        case ConstantType::Float32:
+            write_value(value.ValueFloat32());
+            break;
+        case ConstantType::Float64:
+            write_value(value.ValueFloat64());
+            break;
+        case ConstantType::String:
+            write_value(value.ValueString());
+            break;
+        case ConstantType::Class:
+            write("null");
+            break;
+        }
+    }
+
+    void write(meta_summary const& info)
     {
         write("%\n", info.title);
 
-        if (!info.single_namespace)
-        {
+        if (!info.single_namespace) {
             write("Namespaces     %\n", info.num_namespaces);
         }
 
@@ -240,15 +382,12 @@ struct writer : writer_base<writer>
 
 static void print_usage(writer& w)
 {
-    static auto printColumns = [](writer& w, std::string_view const& col1, std::string_view const& col2)
-    {
+    static auto printColumns = [](writer& w, std::string_view const& col1, std::string_view const& col2) {
         w.write_printf("  %-20s%s\n", col1.data(), col2.data());
     };
 
-    static auto printOption = [](writer& w, cmd::option const& opt)
-    {
-        if (opt.desc.empty())
-        {
+    static auto printOption = [](writer& w, cmd::option const& opt) {
+        if (opt.desc.empty()) {
             return;
         }
         printColumns(w, w.write_temp("-% %", opt.name, opt.arg), opt.desc);
@@ -281,36 +420,286 @@ static void process_args(int const argc, char** argv)
 
     settings.verbose = args.exists("verbose");
     settings.input = args.files("input", database::is_database);
+    settings.group_lists = args.exists("group-lists");
+    settings.extra_details = args.exists("extra-details");
 
-    for (auto&& include : args.values("include"))
-    {
+    const auto list_all         = args.exists("list-all");
+    settings.list_namespaces    = list_all || args.exists("list-namespaces");
+    settings.list_interfaces    = list_all || args.exists("list-interfaces");
+    settings.list_methods       = list_all || args.exists("list-methods");
+    settings.list_properties    = list_all || args.exists("list-properties");
+    settings.list_events        = list_all || args.exists("list-events");
+    settings.list_fields        = list_all || args.exists("list-fields");
+    settings.list_classes       = list_all || args.exists("list-classes");
+    settings.list_structs       = list_all || args.exists("list-structs");
+    settings.list_enums         = list_all || args.exists("list-enums");
+    settings.list_delegates     = list_all || args.exists("list-delegates");
+    settings.list_attributes    = list_all || args.exists("list-attributes");
+    settings.list_contracts     = list_all || args.exists("list-contracts");
+
+    for (auto&& include : args.values("include")) {
         settings.include.insert(include);
     }
 
-    for (auto&& exclude : args.values("exclude"))
-    {
+    for (auto&& exclude : args.values("exclude")) {
         settings.exclude.insert(exclude);
+    }
+
+    settings.filter = { settings.include, settings.exclude };
+}
+
+static void write_summary(writer& w, cache const& c)
+{
+    meta_summary total_info("Total");
+    meta_summary filtered_info("Filtered");
+
+    for (auto const& [ns, members] : c.namespaces()) {
+        meta_summary ns_info(ns, members);
+
+        total_info += ns_info;
+
+        if (!settings.filter.includes(members))
+            continue;
+
+        filtered_info += ns_info;
+
+        if (settings.verbose) {
+            w.write(ns_info);
+        }
+    }
+
+    if (!settings.filter.empty() && filtered_info != total_info) {
+        w.write(filtered_info);
+    }
+
+    w.write(total_info);
+}
+
+static void write_namespace_list(writer& w, cache const& c)
+{
+    w.write("Namespaces:\n");
+
+    for (auto const& [ns, members] : c.namespaces()) {
+        if (!settings.filter.includes(members))
+            continue;
+
+        w.write("%\n", ns);
+    }
+
+    w.write('\n');
+}
+
+static void write_type_collection(writer& w, std::string_view const& ns, std::vector<TypeDef> const& collection)
+{
+    if (settings.group_lists && !collection.empty()) {
+        w.write("%:\n", ns);
+
+        for (auto const& element : collection) {
+            w.write("  %\n", element.TypeName());
+        }
+    } else {
+        for (auto const& element : collection) {
+            w.write("%.%\n", ns, element.TypeName());
+        }
     }
 }
 
+static void write_interface_list(writer& w, cache const& c)
+{
+    w.write("Interfaces:\n");
 
+    for (auto const& [ns, members] : c.namespaces()) {
+        if (!settings.filter.includes(members))
+            continue;
+
+        write_type_collection(w, ns, members.interfaces);
+    }
+
+    w.write('\n');
+}
+
+static void write_method_list(writer& w, cache const& c)
+{
+    w.write("Methods:\n");
+
+    for (auto const& [ns, members] : c.namespaces()) {
+        if (!settings.filter.includes(members))
+            continue;
+
+//        write_type_collection(w, ns, members.methods);
+    }
+
+    w.write('\n');
+}
+
+static void write_property_list(writer& w, cache const& c)
+{
+    w.write("Properties:\n");
+
+    for (auto const& [ns, members] : c.namespaces()) {
+        if (!settings.filter.includes(members))
+            continue;
+
+//        write_type_collection(w, ns, members.properties);
+    }
+
+    w.write('\n');
+}
+
+static void write_event_list(writer& w, cache const& c)
+{
+    w.write("Events:\n");
+
+    for (auto const& [ns, members] : c.namespaces()) {
+        if (!settings.filter.includes(members))
+            continue;
+
+//        write_type_collection(w, ns, members.events);
+    }
+
+    w.write('\n');
+}
+
+static void write_field_list(writer& w, cache const& c)
+{
+    w.write("Fields:\n");
+
+    for (auto const& [ns, members] : c.namespaces()) {
+        if (!settings.filter.includes(members))
+            continue;
+
+//        write_type_collection(w, ns, members.fields);
+    }
+
+    w.write('\n');
+}
+
+static void write_class_list(writer& w, cache const& c)
+{
+    w.write("Classes:\n");
+
+    for (auto const& [ns, members] : c.namespaces()) {
+        if (!settings.filter.includes(members))
+            continue;
+
+        write_type_collection(w, ns, members.classes);
+    }
+
+    w.write('\n');
+}
+
+static void write_struct_list(writer& w, cache const& c)
+{
+    w.write("Structs:\n");
+
+    for (auto const& [ns, members] : c.namespaces()) {
+        if (!settings.filter.includes(members))
+            continue;
+
+        write_type_collection(w, ns, members.structs);
+    }
+
+    w.write('\n');
+}
+
+static void write_enum_list(writer& w, cache const& c)
+{
+    w.write("Enums:\n");
+
+    for (auto const& [ns, members] : c.namespaces()) {
+        if (!settings.filter.includes(members))
+            continue;
+
+        auto const& enums = members.enums;
+
+        if (settings.group_lists && !enums.empty()) {
+            w.write("%:\n", ns);
+
+            for (auto const& type : enums) {
+                w.write("  %\n", type.TypeName());
+
+                if (settings.extra_details) {
+                    for (auto const& field : type.FieldList()) {
+                        if (auto const& constant = field.Constant()) {
+                            w.write("    % = %\n", field.Name(), constant);
+                        }
+                    }
+                }
+            }
+        } else {
+            for (auto const& type : enums) {
+                if (settings.extra_details) {
+                    for (auto const& field : type.FieldList()) {
+                        if (auto const& constant = field.Constant()) {
+                            w.write("%.%.% = %\n", ns, type.TypeName(), field.Name(), constant);
+                        }
+                    }
+                } else {
+                    w.write("%.%\n", ns, type.TypeName());
+                }
+            }
+        }
+    }
+
+    w.write('\n');
+}
+
+static void write_delegate_list(writer& w, cache const& c)
+{
+    w.write("Delegates:\n");
+
+    for (auto const& [ns, members] : c.namespaces()) {
+        if (!settings.filter.includes(members))
+            continue;
+
+        write_type_collection(w, ns, members.delegates);
+    }
+
+    w.write('\n');
+}
+
+static void write_attribute_list(writer& w, cache const& c)
+{
+    w.write("Attributes:\n");
+
+    for (auto const& [ns, members] : c.namespaces()) {
+        if (!settings.filter.includes(members))
+            continue;
+
+        write_type_collection(w, ns, members.attributes);
+    }
+
+    w.write('\n');
+}
+
+static void write_contract_list(writer& w, cache const& c)
+{
+    w.write("Contracts:\n");
+
+    for (auto const& [ns, members] : c.namespaces()) {
+        if (!settings.filter.includes(members))
+            continue;
+
+        write_type_collection(w, ns, members.contracts);
+    }
+
+    w.write('\n');
+}
 
 static int run(int const argc, char** argv)
 {
     int result{};
     writer w;
 
-    try
-    {
+    try {
         const auto start = high_resolution_clock::now();
 
         process_args(argc, argv);
 
         cache c{ settings.input };
-        filter f{ settings.include, settings.exclude };
 
-        if (settings.verbose)
-        {
+
+        if (settings.verbose) {
             std::for_each(c.databases().begin(), c.databases().end(), [&](auto&& db)
                 {
                     w.write("in: %\n", db.path());
@@ -319,46 +708,53 @@ static int run(int const argc, char** argv)
 
         w.flush_to_console();
 
-        meta_summary total_info("Total");
-        meta_summary filtered_info("Filtered");
+        if (settings.list_namespaces)
+            write_namespace_list(w, c);
 
-        for (auto const& [ns, members] : c.namespaces())
-        {
-            meta_summary ns_info(ns, members);
+        if (settings.list_interfaces)
+            write_interface_list(w, c);
 
-            total_info += ns_info;
+        if (settings.list_methods)
+            write_method_list(w, c);
 
-            if (!f.includes(members))
-                continue;
+        if (settings.list_properties)
+            write_property_list(w, c);
 
-            filtered_info += ns_info;
+        if (settings.list_events)
+            write_event_list(w, c);
 
-            if (settings.verbose)
-            {
-                w.Write(ns_info);
-            }
-        }
+        if (settings.list_fields)
+            write_field_list(w, c);
 
-        if (!f.empty() && filtered_info != total_info)
-        {
-            w.Write(filtered_info);
-        }
+        if (settings.list_classes)
+            write_class_list(w, c);
 
-        w.Write(total_info);
+        if (settings.list_structs)
+            write_struct_list(w, c);
+
+        if (settings.list_enums)
+            write_enum_list(w, c);
+
+        if (settings.list_delegates)
+            write_delegate_list(w, c);
+
+        if (settings.list_attributes)
+            write_attribute_list(w, c);
+
+        if (settings.list_contracts)
+            write_contract_list(w, c);
+
+        write_summary(w, c);
 
         if (settings.verbose)
-        {
             w.write("time: %ms\n", duration_cast<duration<int64_t, std::milli>>(high_resolution_clock::now() - start).count());
-        }
     }
-    catch (std::exception const& e)
-    {
+    catch (std::exception const& e) {
         w.write("\nERROR: %\n", e.what());
 
         result = 1;
     }
-    catch (usage_exception const&)
-    {
+    catch (usage_exception const&) {
         print_usage(w);
     }
 
