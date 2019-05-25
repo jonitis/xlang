@@ -67,8 +67,8 @@ struct settings_type
 
 struct meta_summary
 {
-    meta_summary(std::string_view const& title) noexcept : title{ title } {}
-    meta_summary(std::string_view const& ns, cache::namespace_members const& members) noexcept : title{ ns }, single_namespace{ true }
+    meta_summary(const std::string_view& title) noexcept : title{ title } {}
+    meta_summary(const std::string_view& ns, const cache::namespace_members& members) noexcept : title{ ns }, single_namespace{ true }
     {
         num_namespaces = 1;
         num_interfaces = members.interfaces.size();
@@ -79,12 +79,12 @@ struct meta_summary
         num_attributes = members.attributes.size();
         num_contracts = members.contracts.size();
 
-        for (auto const& iface : members.interfaces)
+        for (const auto& iface : members.interfaces)
         {
-            auto const& methods = iface.MethodList();
-            auto const& properties = iface.PropertyList();
-            auto const& events = iface.EventList();
-            auto const& fields = iface.FieldList();
+            const auto& methods = iface.MethodList();
+            const auto& properties = iface.PropertyList();
+            const auto& events = iface.EventList();
+            const auto& fields = iface.FieldList();
 
             num_methods += distance(methods);
             num_properties += distance(properties);
@@ -108,7 +108,7 @@ struct meta_summary
     size_t num_attributes{};
     size_t num_contracts{};
 
-    meta_summary& operator +=(meta_summary const& other) noexcept
+    meta_summary& operator +=(const meta_summary& other) noexcept
     {
         num_namespaces += other.num_namespaces;
         num_interfaces += other.num_interfaces;
@@ -126,7 +126,7 @@ struct meta_summary
         return *this;
     }
 
-    bool operator ==(meta_summary const& other) noexcept
+    bool operator ==(const meta_summary& other) noexcept
     {
         return num_namespaces == other.num_namespaces &&
                num_interfaces == other.num_interfaces &&
@@ -142,7 +142,7 @@ struct meta_summary
                num_contracts == other.num_contracts;
     }
 
-    bool operator !=(meta_summary const& other) noexcept
+    bool operator !=(const meta_summary& other) noexcept
     {
         return !operator ==(other);
     }
@@ -173,29 +173,52 @@ struct writer : writer_base<writer>
     std::string_view current;
     int32_t indent{};
 
+    std::vector<std::pair<GenericParam, GenericParam>> generic_param_stack;
+
+    struct generic_param_guard
+    {
+        explicit generic_param_guard(writer* arg) : owner(arg)
+        {}
+
+        ~generic_param_guard()
+        {
+            if (owner) {
+                owner->generic_param_stack.pop_back();
+            }
+        }
+
+        generic_param_guard(generic_param_guard&& other) : owner(other.owner)
+        {
+            owner = nullptr;
+        }
+        generic_param_guard& operator=(const generic_param_guard&) = delete;
+        writer* owner;
+    };
+
+    generic_param_guard push_generic_params(std::pair<GenericParam, GenericParam>&& arg)
+    {
+        generic_param_stack.push_back(std::move(arg));
+        return generic_param_guard{ this };
+    }
+
     void write_indent()
     {
-        for (int32_t i = 0; i < indent; i++)
-        {
+        for (int32_t i = 0; i < indent; i++) {
             writer_base::write_impl("    ");
         }
     }
 
-    void write_impl(std::string_view const& value)
+    void write_impl(const std::string_view& value)
     {
         std::string_view::size_type current_pos{ 0 };
         auto on_new_line = back() == '\n';
 
-        while (true)
-        {
+        while (true) {
             const auto pos = value.find('\n', current_pos);
 
-            if (pos == std::string_view::npos)
-            {
-                if (current_pos < value.size())
-                {
-                    if (on_new_line)
-                    {
+            if (pos == std::string_view::npos) {
+                if (current_pos < value.size()) {
+                    if (on_new_line) {
                         write_indent();
                     }
 
@@ -208,8 +231,7 @@ struct writer : writer_base<writer>
             auto current_line = value.substr(current_pos, pos - current_pos + 1);
             auto empty_line = current_line[0] == '\n';
 
-            if (on_new_line && !empty_line)
-            {
+            if (on_new_line && !empty_line) {
                 write_indent();
             }
 
@@ -220,10 +242,9 @@ struct writer : writer_base<writer>
         }
     }
 
-    void write_impl(char const value)
+    void write_impl(const char value)
     {
-        if (back() == '\n' && value != '\n')
-        {
+        if (back() == '\n' && value != '\n') {
             write_indent();
         }
 
@@ -231,7 +252,7 @@ struct writer : writer_base<writer>
     }
 
     template <typename... Args>
-    std::string write_temp(std::string_view const& value, Args const& ... args)
+    std::string write_temp(const std::string_view& value, const Args& ... args)
     {
         auto restore_indent = indent;
         indent = 0;
@@ -308,7 +329,7 @@ struct writer : writer_base<writer>
         write("\"%\"", value);
     }
 
-    void write(Constant const& value)
+    void write(const Constant& value)
     {
         switch (value.Type()) {
         case ConstantType::Boolean:
@@ -356,7 +377,231 @@ struct writer : writer_base<writer>
         }
     }
 
-    void write(meta_summary const& info)
+    void write(const TypeDef& type)
+    {
+        write("%.%", type.TypeNamespace(), type.TypeName());
+    }
+
+    void write(const TypeRef& type)
+    {
+        auto ns = type.TypeNamespace();
+
+        if (ns == current) {        // DJ: TODO: Update !!!
+            write("%", type.TypeName());
+        } else {
+            write("%.%", type.TypeNamespace(), type.TypeName());
+        }
+    }
+
+    void write(const TypeSpec& type)
+    {
+        write(type.Signature().GenericTypeInst());
+    }
+
+    void write(const coded_index<TypeDefOrRef>& type)
+    {
+        switch (type.type()) {
+        case TypeDefOrRef::TypeDef:
+            write(type.TypeDef());
+            break;
+
+        case TypeDefOrRef::TypeRef:
+            write(type.TypeRef());
+            break;
+
+        case TypeDefOrRef::TypeSpec:
+            write(type.TypeSpec());
+            break;
+        }
+    }
+
+    void write(const GenericTypeInstSig& type)
+    {
+        write("%<%>",
+            type.GenericType(),
+            bind_list(", ", type.GenericArgs()));
+    }
+
+    void write(TypeSig const& signature)
+    {
+        std::visit(overloaded
+            {
+                [&](ElementType type) {
+                    if (type <= ElementType::String)
+                    {
+                        static constexpr const char* primitives[]
+                        {
+                            "End",
+                            "Void",
+                            "Boolean",
+                            "Char",
+                            "Int8",
+                            "UInt8",
+                            "Int16",
+                            "UInt16",
+                            "Int32",
+                            "UInt32",
+                            "Int64",
+                            "UInt64",
+                            "Single",
+                            "Double",
+                            "String"
+                        };
+
+                        write(primitives[static_cast<uint32_t>(type)]);
+                    } else if (type == ElementType::Object)
+                    {
+                        write("Object");
+                    }
+                },
+                [&](GenericTypeIndex var) {
+                    write("%", begin(generic_param_stack.back())[var.index].Name());
+                },
+                [&](GenericMethodTypeIndex) {
+                    throw_invalid("Generic methods not supported.");
+                },
+                [&](auto&& type) {
+                    write(type);
+                }
+            },
+            signature.Type());
+    }
+
+    void write(InterfaceImpl const& impl)
+    {
+        write(impl.Interface());
+    }
+
+    void write(MethodDef const& method)
+    {
+        auto signature{ method.Signature() };
+
+        auto param_list = method.ParamList();
+        Param param;
+
+        if (method.Signature().ReturnType() && !empty(param_list) && param_list.first.Sequence() == 0)
+        {
+            param = param_list.first + 1;
+        } else
+        {
+            param = param_list.first;
+        }
+
+        bool first{ true };
+
+        for (auto&& arg : signature.Params())
+        {
+            if (first)
+            {
+                first = false;
+            } else
+            {
+                write(", ");
+            }
+
+            if (arg.ByRef())
+            {
+                write("ref ");
+            }
+
+            if (is_const(arg))
+            {
+                write("const ");
+            }
+
+            write("% %", arg.Type(), param.Name());
+            ++param;
+        }
+    }
+
+    void write(RetTypeSig const& signature)
+    {
+        if (signature)
+        {
+            write(signature.Type());
+        } else
+        {
+            write("void");
+        }
+    }
+
+    std::vector<Field> find_enumerators(ElemSig::EnumValue const& arg)
+    {
+        std::vector<Field> result;
+        uint64_t const original_value = std::visit([](auto&& value) { return static_cast<uint64_t>(value); }, arg.value);
+        uint64_t flags_value = original_value;
+
+        auto get_enumerator_value = [](auto&& arg) -> uint64_t
+        {
+            if constexpr (std::is_integral_v<std::remove_reference_t<decltype(arg)>>)
+            {
+                return static_cast<uint64_t>(arg);
+            } else
+            {
+                throw_invalid("Non-integral enumerator encountered");
+            }
+        };
+
+        for (auto const& field : arg.type.m_typedef.FieldList())
+        {
+            if (auto const& constant = field.Constant())
+            {
+                uint64_t const enumerator_value = std::visit(get_enumerator_value, constant.Value());
+                if (enumerator_value == original_value)
+                {
+                    result.assign(1, field);
+                    return result;
+                } else if ((flags_value & enumerator_value) == enumerator_value)
+                {
+                    result.push_back(field);
+                    flags_value &= (~enumerator_value);
+                }
+            }
+        }
+
+        // Didn't find a match, or a set of flags that could build up the value
+        if (flags_value != 0)
+        {
+            result.clear();
+        }
+        return result;
+    }
+
+    void write(const FixedArgSig& arg)
+    {
+        std::visit(overloaded{
+            [this](ElemSig::SystemType arg) {
+                write(arg.name);
+            },
+            [this](ElemSig::EnumValue arg) {
+                const auto enumerators = find_enumerators(arg);
+                if (enumerators.empty()) {
+                    std::visit([this](auto&& value) { write_value(value); }, arg.value);
+                } else {
+                    bool first = true;
+                    for (auto const& enumerator : enumerators)
+                    {
+                        if (!first)
+                        {
+                            write(" | ");
+                        }
+                        write("%.%.%", arg.type.m_typedef.TypeNamespace(), arg.type.m_typedef.TypeName(), enumerator.Name());
+                        first = false;
+                    }
+                }
+            },
+            [this](auto&& arg) {
+                write_value(arg);
+            }
+            }, std::get<ElemSig>(arg.value).value);
+    }
+
+    void write(const NamedArgSig& arg)
+    {
+        write(arg.value);
+    }
+
+    void write(const meta_summary& info)
     {
         write("%\n", info.title);
 
@@ -382,11 +627,11 @@ struct writer : writer_base<writer>
 
 static void print_usage(writer& w)
 {
-    static auto printColumns = [](writer& w, std::string_view const& col1, std::string_view const& col2) {
+    static auto printColumns = [](writer& w, const std::string_view& col1, const std::string_view& col2) {
         w.write_printf("  %-20s%s\n", col1.data(), col2.data());
     };
 
-    static auto printOption = [](writer& w, cmd::option const& opt) {
+    static auto printOption = [](writer& w, const cmd::option& opt) {
         if (opt.desc.empty()) {
             return;
         }
@@ -411,7 +656,7 @@ Where <spec> is one or more of:
     w.write(format, bind_each(printOption, options));
 }
 
-static void process_args(int const argc, char** argv)
+static void process_args(int argc, char** argv)
 {
     cmd::reader args{ argc, argv, options };
 
@@ -448,12 +693,12 @@ static void process_args(int const argc, char** argv)
     settings.filter = { settings.include, settings.exclude };
 }
 
-static void write_summary(writer& w, cache const& c)
+static void write_summary(writer& w, const cache& c)
 {
     meta_summary total_info("Total");
     meta_summary filtered_info("Filtered");
 
-    for (auto const& [ns, members] : c.namespaces()) {
+    for (const auto& [ns, members] : c.namespaces()) {
         meta_summary ns_info(ns, members);
 
         total_info += ns_info;
@@ -475,11 +720,11 @@ static void write_summary(writer& w, cache const& c)
     w.write(total_info);
 }
 
-static void write_namespace_list(writer& w, cache const& c)
+static void write_namespace_list(writer& w, const cache& c)
 {
     w.write("Namespaces:\n");
 
-    for (auto const& [ns, members] : c.namespaces()) {
+    for (const auto& [ns, members] : c.namespaces()) {
         if (!settings.filter.includes(members))
             continue;
 
@@ -489,26 +734,26 @@ static void write_namespace_list(writer& w, cache const& c)
     w.write('\n');
 }
 
-static void write_type_collection(writer& w, std::string_view const& ns, std::vector<TypeDef> const& collection)
+static void write_type_collection(writer& w, const std::string_view& ns, const std::vector<TypeDef>& collection)
 {
     if (settings.group_lists && !collection.empty()) {
         w.write("%:\n", ns);
 
-        for (auto const& element : collection) {
+        for (const auto& element : collection) {
             w.write("  %\n", element.TypeName());
         }
     } else {
-        for (auto const& element : collection) {
+        for (const auto& element : collection) {
             w.write("%.%\n", ns, element.TypeName());
         }
     }
 }
 
-static void write_interface_list(writer& w, cache const& c)
+static void write_interface_list(writer& w, const cache& c)
 {
     w.write("Interfaces:\n");
 
-    for (auto const& [ns, members] : c.namespaces()) {
+    for (const auto& [ns, members] : c.namespaces()) {
         if (!settings.filter.includes(members))
             continue;
 
@@ -518,11 +763,11 @@ static void write_interface_list(writer& w, cache const& c)
     w.write('\n');
 }
 
-static void write_method_list(writer& w, cache const& c)
+static void write_method_list(writer& w, const cache& c)
 {
     w.write("Methods:\n");
 
-    for (auto const& [ns, members] : c.namespaces()) {
+    for (const auto& [ns, members] : c.namespaces()) {
         if (!settings.filter.includes(members))
             continue;
 
@@ -532,11 +777,11 @@ static void write_method_list(writer& w, cache const& c)
     w.write('\n');
 }
 
-static void write_property_list(writer& w, cache const& c)
+static void write_property_list(writer& w, const cache& c)
 {
     w.write("Properties:\n");
 
-    for (auto const& [ns, members] : c.namespaces()) {
+    for (const auto& [ns, members] : c.namespaces()) {
         if (!settings.filter.includes(members))
             continue;
 
@@ -546,11 +791,11 @@ static void write_property_list(writer& w, cache const& c)
     w.write('\n');
 }
 
-static void write_event_list(writer& w, cache const& c)
+static void write_event_list(writer& w, const cache& c)
 {
     w.write("Events:\n");
 
-    for (auto const& [ns, members] : c.namespaces()) {
+    for (const auto& [ns, members] : c.namespaces()) {
         if (!settings.filter.includes(members))
             continue;
 
@@ -560,11 +805,11 @@ static void write_event_list(writer& w, cache const& c)
     w.write('\n');
 }
 
-static void write_field_list(writer& w, cache const& c)
+static void write_field_list(writer& w, const cache& c)
 {
     w.write("Fields:\n");
 
-    for (auto const& [ns, members] : c.namespaces()) {
+    for (const auto& [ns, members] : c.namespaces()) {
         if (!settings.filter.includes(members))
             continue;
 
@@ -574,11 +819,11 @@ static void write_field_list(writer& w, cache const& c)
     w.write('\n');
 }
 
-static void write_class_list(writer& w, cache const& c)
+static void write_class_list(writer& w, const cache& c)
 {
     w.write("Classes:\n");
 
-    for (auto const& [ns, members] : c.namespaces()) {
+    for (const auto& [ns, members] : c.namespaces()) {
         if (!settings.filter.includes(members))
             continue;
 
@@ -588,49 +833,73 @@ static void write_class_list(writer& w, cache const& c)
     w.write('\n');
 }
 
-static void write_struct_list(writer& w, cache const& c)
+static void write_struct_list(writer& w, const cache& c)
 {
     w.write("Structs:\n");
 
-    for (auto const& [ns, members] : c.namespaces()) {
+    for (const auto& [ns, members] : c.namespaces()) {
         if (!settings.filter.includes(members))
             continue;
 
-        write_type_collection(w, ns, members.structs);
+        const auto& structs = members.structs;
+
+        if (settings.group_lists && !structs.empty()) {
+            w.write("%:\n", ns);
+
+            for (const auto& type : structs) {
+                w.write("  %\n", type.TypeName());
+
+                if (settings.extra_details) {
+                    for (const auto& field : type.FieldList()) {
+                        w.write("    % (%)\n", field.Name(), field.Signature().Type());
+                    }
+                }
+            }
+        } else {
+            for (const auto& type : structs) {
+                if (settings.extra_details) {
+                    for (const auto& field : type.FieldList()) {
+                        w.write("%.%.% (%)\n", ns, type.TypeName(), field.Name(), field.Signature().Type());
+                    }
+                } else {
+                    w.write("%.%\n", ns, type.TypeName());
+                }
+            }
+        }
     }
 
     w.write('\n');
 }
 
-static void write_enum_list(writer& w, cache const& c)
+static void write_enum_list(writer& w, const cache& c)
 {
     w.write("Enums:\n");
 
-    for (auto const& [ns, members] : c.namespaces()) {
+    for (const auto& [ns, members] : c.namespaces()) {
         if (!settings.filter.includes(members))
             continue;
 
-        auto const& enums = members.enums;
+        const auto& enums = members.enums;
 
         if (settings.group_lists && !enums.empty()) {
             w.write("%:\n", ns);
 
-            for (auto const& type : enums) {
+            for (const auto& type : enums) {
                 w.write("  %\n", type.TypeName());
 
                 if (settings.extra_details) {
-                    for (auto const& field : type.FieldList()) {
-                        if (auto const& constant = field.Constant()) {
+                    for (const auto& field : type.FieldList()) {
+                        if (const auto& constant = field.Constant()) {
                             w.write("    % = %\n", field.Name(), constant);
                         }
                     }
                 }
             }
         } else {
-            for (auto const& type : enums) {
+            for (const auto& type : enums) {
                 if (settings.extra_details) {
-                    for (auto const& field : type.FieldList()) {
-                        if (auto const& constant = field.Constant()) {
+                    for (const auto& field : type.FieldList()) {
+                        if (const auto& constant = field.Constant()) {
                             w.write("%.%.% = %\n", ns, type.TypeName(), field.Name(), constant);
                         }
                     }
@@ -644,11 +913,11 @@ static void write_enum_list(writer& w, cache const& c)
     w.write('\n');
 }
 
-static void write_delegate_list(writer& w, cache const& c)
+static void write_delegate_list(writer& w, const cache& c)
 {
     w.write("Delegates:\n");
 
-    for (auto const& [ns, members] : c.namespaces()) {
+    for (const auto& [ns, members] : c.namespaces()) {
         if (!settings.filter.includes(members))
             continue;
 
@@ -658,11 +927,11 @@ static void write_delegate_list(writer& w, cache const& c)
     w.write('\n');
 }
 
-static void write_attribute_list(writer& w, cache const& c)
+static void write_attribute_list(writer& w, const cache& c)
 {
     w.write("Attributes:\n");
 
-    for (auto const& [ns, members] : c.namespaces()) {
+    for (const auto& [ns, members] : c.namespaces()) {
         if (!settings.filter.includes(members))
             continue;
 
@@ -672,11 +941,11 @@ static void write_attribute_list(writer& w, cache const& c)
     w.write('\n');
 }
 
-static void write_contract_list(writer& w, cache const& c)
+static void write_contract_list(writer& w, const cache& c)
 {
     w.write("Contracts:\n");
 
-    for (auto const& [ns, members] : c.namespaces()) {
+    for (const auto& [ns, members] : c.namespaces()) {
         if (!settings.filter.includes(members))
             continue;
 
@@ -686,7 +955,7 @@ static void write_contract_list(writer& w, cache const& c)
     w.write('\n');
 }
 
-static int run(int const argc, char** argv)
+static int run(int argc, char** argv)
 {
     int result{};
     writer w;
@@ -749,12 +1018,12 @@ static int run(int const argc, char** argv)
         if (settings.verbose)
             w.write("time: %ms\n", duration_cast<duration<int64_t, std::milli>>(high_resolution_clock::now() - start).count());
     }
-    catch (std::exception const& e) {
+    catch (const std::exception& e) {
         w.write("\nERROR: %\n", e.what());
 
         result = 1;
     }
-    catch (usage_exception const&) {
+    catch (const usage_exception&) {
         print_usage(w);
     }
 
@@ -766,7 +1035,7 @@ static int run(int const argc, char** argv)
 }
 
 
-int main(int const argc, char** argv)
+int main(int argc, char** argv)
 {
     return meta_info::run(argc, argv);
 }
